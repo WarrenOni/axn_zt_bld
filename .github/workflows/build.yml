@@ -1,0 +1,73 @@
+name: Build Axion OS for Ziti
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Axion OS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Maximize Build Space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 10240
+        swap-size-mb: 10240
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+
+    - name: Set up Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+        mkdir -p ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        sudo ln -sf ~/bin/repo /usr/bin/repo
+
+    - name: Initialize and Sync Axion OS
+      run: |
+        git config --global user.name "Builder"
+        git config --global user.email "builder@example.com"
+        mkdir -p workspace
+        cd workspace
+        
+        # Initialize AxionAOSP source tree
+        repo init -u https://github.com/AxionAOSP/android.git -b lineage-23.2 --git-lfs --depth=1
+        
+        # Download the custom roomservice.xml you created in Step 2
+        mkdir -p .repo/local_manifests
+        curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/roomservice.xml" > .repo/local_manifests/roomservice.xml
+        
+        # Perform a shallow, highly optimized sync
+        repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+
+    - name: Patch KernelSU
+      run: |
+        cd workspace/kernel/oneplus/sm8350
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+
+    - name: Compile the ROM
+      run: |
+        cd workspace
+        export CCACHE_EXEC=/usr/bin/ccache
+        export USE_CCACHE=1
+        ccache -M 50G
+        
+        # Configure environment and build
+        . build/envsetup.sh
+        
+        # By default, Axion builds vanilla (non-GMS). 
+        lunch axion_ziti-userdebug
+        mka bacon -j$(nproc --all)
+
+    - name: Upload Flashable ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: AxionOS-Ziti
+        path: workspace/out/target/product/ziti/AxionOS*.zip
