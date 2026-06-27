@@ -1,4 +1,4 @@
-name: Build Axion OS for Ziti
+name: Build Axion OS (lineage-23.2) for Ziti
 
 on:
   workflow_dispatch:
@@ -37,15 +37,20 @@ jobs:
         mkdir -p workspace
         cd workspace
         
-        # Initialize AxionAOSP source tree
+        # Initialize AxionAOSP source tree for the lineage-23.2 branch
         repo init -u https://github.com/AxionAOSP/android.git -b lineage-23.2 --git-lfs --depth=1
         
-        # Download the custom roomservice.xml you created in Step 2
+        # Download the custom roomservice.xml
         mkdir -p .repo/local_manifests
         curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/roomservice.xml" > .repo/local_manifests/roomservice.xml
         
         # Perform a shallow, highly optimized sync
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+
+    - name: Generate Private Keys
+      run: |
+        cd workspace
+        gk -s
 
     - name: Patch KernelSU
       run: |
@@ -59,15 +64,17 @@ jobs:
         export USE_CCACHE=1
         ccache -M 50G
         
-        # Configure environment and build
+        # Configure the Axion environment
         . build/envsetup.sh
         
-        # By default, Axion builds vanilla (non-GMS). 
-        lunch axion_ziti-userdebug
-        mka bacon -j$(nproc --all)
+        # Select the device and variant (va = vanilla/no GApps). You can change 'va' to 'gms' for Google Apps.
+        axion ziti va
+        
+        # Build the ROM
+        ax -br -j$(nproc --all)
 
     - name: Upload Flashable ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: AxionOS-Ziti
-        path: workspace/out/target/product/ziti/AxionOS*.zip
+        name: AxionOS-Ziti-Latest
+        path: workspace/out/target/product/ziti/Axion*.zip
